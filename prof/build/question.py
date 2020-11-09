@@ -18,6 +18,7 @@ from prof.utils import numeric, system, event
 
 class QuestionBase(object):
 	_bool_map = {"true": True, "false": False}
+	_attrs = ["type", "text", "answer", "image", "bot", "guild", "id"]
 	__help = "**Formatted** help text for __question type__."
 
 	def __init__(self, type: str, *args, **kwargs):
@@ -46,6 +47,12 @@ class QuestionBase(object):
 		self.answer: Optional[Union[str, int, float]] = None
 		self.guild: Optional[discord.Guild] = None
 		self.id: int = 0
+
+		# Drop unsupported keyword attributes
+		exclude = set(kwargs.keys()) - set(self._attrs)
+		for key in exclude:
+			kwargs.pop(key)
+
 		self.__dict__.update(kwargs)
 		self.build(*args, **kwargs)
 
@@ -228,6 +235,7 @@ class FreeResponse(QuestionBase):
 		self.exact = False
 		self._min_ratio = 70
 		super(FreeResponse, self).__init__("free-response", *args, **kwargs)
+		self._attrs.extend(["exact"])
 
 	@property
 	def dict(self):
@@ -298,6 +306,7 @@ class Numeric(QuestionBase):
 		"""
 		self.decimal: Optional[int] = None
 		super(Numeric, self).__init__("numeric", *args, **kwargs)
+		self._attrs.extend(["decimal"])
 
 	@property
 	def dict(self) -> dict:
@@ -400,6 +409,7 @@ class MultipleChoice(QuestionBase):
 		self.options = []
 		self.shuffle = False
 		super(MultipleChoice, self).__init__("multiple-choice", *args, **kwargs)
+		self._attrs.extend(["options", "shuffle"])
 
 	@property
 	def Options(self) -> dict:
@@ -538,7 +548,9 @@ class MultipleResponse(MultipleChoice):
 	"""
 
 	def __init__(self, *args, **kwargs):
+		self.partial: bool = False
 		super(MultipleResponse, self).__init__(*args, **kwargs)
+		self._attrs.extend(["partial"])
 
 	@property
 	def editor_embed(self) -> discord.Embed:
@@ -546,6 +558,7 @@ class MultipleResponse(MultipleChoice):
 		# Drop answer field
 		embed.remove_field(1)
 		embed.insert_field_at(index=0, name="Shuffle", value=str(self.shuffle))
+		embed.insert_field_at(index=0, name="Partial", value=str(self.partial))
 		embed.add_field(name="Options", value='\n'.join(f"{i+1}) {opt}" for i, opt in enumerate(self.options)), inline=False)
 		embed.insert_field_at(name="Answer", value='\n'.join(f"{i + 1}) {ans}" for i, ans in enumerate(self.answer)), inline=False)
 		return embed
@@ -624,3 +637,37 @@ class MultipleResponse(MultipleChoice):
 		"""
 		self.answer.pop(i)
 		return True
+
+
+class Question:
+	"""
+
+	Mirror class for creating the appropriate question type.
+
+	"""
+	_map = {
+		"free-response": FreeResponse,
+		"numeric": Numeric,
+		"multiple-choice": MultipleChoice,
+		"multiple-response": MultipleResponse
+	}
+
+	def __new__(cls, doc: Optional[dict] = None, type: Optional[str] = None, **kwargs):
+		"""
+		Create a new question using the desired question type and its desired attributes
+
+		:param doc:
+		:param type:
+		:param kwargs:
+		"""
+		if doc is None:
+			doc = {}
+
+		doc.update(kwargs)
+		if type:
+			return cls._map[type](**doc)
+		elif "type" in doc:
+			return cls._map[doc["type"]](**doc)
+		else:
+			raise AttributeError("'type' is missing from arguments")
+
