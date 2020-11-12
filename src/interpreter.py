@@ -8,7 +8,7 @@ from discord.ext import commands
 import discord
 import re
 
-from prof.utils import numeric
+from professor.utils import numeric
 
 
 class CommandInterpreter:

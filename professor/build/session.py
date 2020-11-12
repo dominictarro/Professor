@@ -8,8 +8,8 @@ from discord.ext import commands
 import datetime
 import discord
 
-from prof.build.quiz import Quiz
-from prof.utils.numeric import Time
+from professor.build.quiz import Quiz
+from professor.utils.numeric import Time
 
 
 class SessionBase(object):

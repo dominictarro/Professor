@@ -1,7 +1,7 @@
 from typing import Union, Dict, Callable, Any
 import random
 
-from prof.utils.numeric import Time
+from professor.utils.numeric import Time
 
 
 class Quiz(object):

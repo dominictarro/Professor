@@ -13,7 +13,7 @@ import random
 import re
 
 # Local dependencies
-from prof.utils import numeric, system, event
+from professor.utils import numeric, system, event
 
 
 class QuestionBase(object):

@@ -8,8 +8,8 @@ import discord
 import random
 import json
 
-from prof.utils.numeric import length
-from prof.utils.system import EmbedLimits
+from professor.utils.numeric import length
+from professor.utils.system import EmbedLimits
 
 
 def on_change_embed(f: Callable) -> Callable:
