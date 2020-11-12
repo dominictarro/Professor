@@ -1,7 +1,7 @@
 
 <div align="center">
 	<h1>Professor</h1>
-	<img src="./dev/the-professor.png" alt="The Professor" width="50%" height="auto">
+	<img src="./dev/astro-professor.png" alt="The Professor" width="50%" height="auto">
 
 *The brainiac's bot.*
 </div>
