@@ -4,14 +4,27 @@ Classes, functions, etc. that deal mostly with computation
 
 """
 
-from typing import Optional, Union, Dict, Tuple
+from typing import Optional, Union, Dict, Tuple, Callable
 import datetime
 import re
 
 
+def auto_simplify(f: Callable) -> Callable:
+	"""
+
+	:param f:
+	:return:
+	"""
+	def wrap(inst, *args, **kwargs):
+		x = f(inst, *args, **kwargs)
+		x.simplify()
+		return x
+	return wrap
+
+
 class Time(object):
 
-	__units = ["weeks", "days", "hours", "minutes", "seconds"]
+	__units = ("weeks", "days", "hours", "minutes", "seconds")
 
 	def __init__(self,
 				 seconds: Optional[Union[int, float]]=0,
@@ -32,13 +45,19 @@ class Time(object):
 		:param weeks:   ...
 		:param round:   How many places to round the seconds to
 		"""
-		self.days = days if days >= 0 else 0
-		self.hours = hours if hours >= 0 else 0
-		self.minutes = minutes if minutes >= 0 else 0
-		self.seconds = seconds if seconds >= 0 else 0
-		self.weeks = weeks if weeks >= 0 else 0
+		assert all(x >= 0 for x in (seconds, minutes, hours, days, weeks))
+		self.days = days
+		self.hours = hours
+		self.minutes = minutes
+		self.seconds = seconds
+		self.weeks = weeks
 		self.round = round
-		self.simplify()
+
+	@auto_simplify
+	def __new__(cls, *args, **kwargs):
+		inst = object.__new__(cls)
+		inst.__init__(*args, **kwargs)
+		return inst
 
 	@property
 	def as_seconds(self) -> Union[int, float]:
@@ -62,8 +81,17 @@ class Time(object):
 				t.__dict__[unit] = int(splits[i])
 			elif all(x.isnumeric() for x in splits[i].split('.')):
 				t.__dict__[unit] = float(splits[i])
-		t.simplify()
 		return t
+
+	@classmethod
+	def from_timedelta(cls, dt: datetime.timedelta):
+		"""
+		Converts a datetime object to a Time object
+
+		:param dt:
+		:return:
+		"""
+		return Time(days=dt.days, seconds=dt.seconds)
 
 	@staticmethod
 	def unit_string(x: Union[float, int], name: str) -> Optional[str]:
@@ -99,6 +127,8 @@ class Time(object):
 				concat.append(string)
 		if len(concat) == 1:
 			return concat[0]
+		elif len(concat) == 0:
+			return "0 seconds"
 		return ', '.join(concat[:-1]) + " and " + concat[-1]
 
 	def __repr__(self):
@@ -108,35 +138,61 @@ class Time(object):
 		"""
 		return f"Time({' '.join(f'{name}={self.__dict__[name]}' for name in self.__units if self.__dict__[name])})"
 
-	def __ge__(self, other):
-		assert isinstance(other, Time)
-		return self.as_seconds >= other.as_seconds
+	def __ge__(self, x):
+		assert isinstance(x, Time)
+		return self.as_seconds >= x.as_seconds
 
-	def __gt__(self, other):
-		assert isinstance(other, Time)
-		return self.as_seconds > other.as_seconds
+	def __gt__(self, x):
+		assert isinstance(x, Time)
+		return self.as_seconds > x.as_seconds
 
-	def __le__(self, other):
-		assert isinstance(other, Time)
-		return self.as_seconds <= other.as_seconds
+	def __le__(self, x):
+		assert isinstance(x, Time)
+		return self.as_seconds <= x.as_seconds
 
-	def __lt__(self, other):
-		assert isinstance(other, Time)
-		return self.as_seconds < other.as_seconds
+	def __lt__(self, x):
+		assert isinstance(x, Time)
+		return self.as_seconds < x.as_seconds
 
-	def __eq__(self, other):
-		assert isinstance(other, Time)
-		return self.as_seconds == other.as_seconds
+	def __eq__(self, x):
+		assert isinstance(x, Time)
+		return self.as_seconds == x.as_seconds
 
-	def __add__(self, other):
-		assert isinstance(other, Time)
-		return Time(
-			weeks=self.weeks+other.weeks,
-			days=self.days+other.days,
-			hours=self.hours+other.hours,
-			minutes=self.minutes+other.minutes,
-			seconds=self.seconds+other.seconds
-		)
+	@auto_simplify
+	def __add__(self, x):
+		assert isinstance(x, Time)
+		return Time(seconds=self.as_seconds + x.as_seconds)
+
+	@auto_simplify
+	def __radd__(self, x):
+		assert isinstance(x, Time)
+		return Time(seconds=self.as_seconds + x.as_seconds)
+
+	@auto_simplify
+	def __sub__(self, x):
+		assert isinstance(x, Time)
+		return Time(seconds=self.as_seconds - x.as_seconds)
+
+	@auto_simplify
+	def __rsub__(self, x):
+		assert isinstance(x, Time)
+		return Time(seconds=x.as_seconds - self.as_seconds)
+
+	@auto_simplify
+	def __mul__(self, x: Union[int, float]):
+		return Time(seconds=self.as_seconds * x)
+
+	@auto_simplify
+	def __rmul__(self, x: Union[int, float]):
+		return Time(seconds=self.as_seconds * x)
+
+	@auto_simplify
+	def __truediv__(self, x: Union[int, float]):
+		return Time(seconds=self.as_seconds / x)
+
+	@auto_simplify
+	def __rtruediv__(self, x: Union[int, float]):
+		return Time(seconds=x / self.as_seconds)
 
 	@property
 	def dict(self):
@@ -145,7 +201,7 @@ class Time(object):
 
 		:return:
 		"""
-		return {k: self.__dict__[k] for k in ("weeks", "days", "hours", "minutes", "seconds")}
+		return {k: self.__dict__[k] for k in self.__units}
 
 	def simplify(self):
 		"""
@@ -159,10 +215,11 @@ class Time(object):
 		"""
 		self.__smooth_backward()
 		if self.round is not None:
-			for unit in reversed(self.__units):
-				if self.__dict__[unit] != 0:
-					self.__dict__[unit] = round(self.__dict__[unit], self.round) if self.round != 0 else int(round(self.__dict__[unit], self.round))
+			self.seconds = round(self.seconds, self.round) if self.round != 0 else int(round(self.seconds, self.round))
 		self.__smooth_forward()
+		# Enforce integer type after smoothing for all units but seconds
+		for unit in self.__units[:-1]:
+			self.__dict__[unit] = int(self.__dict__[unit])
 
 	@staticmethod
 	def __integer_extract(x: Union[float, int]) -> Tuple[int, float]:
@@ -223,6 +280,38 @@ class Time(object):
 			self.weeks += self.days // 7
 			self.days %= 7
 
+	def add(self, s: Union[int, float], inplace: bool = False):
+		"""
+		Adds the given seconds
+
+		:param s:
+		:param inplace:
+		:return:
+		"""
+		x = Time(seconds=s)
+		t = self + x
+		t.round = self.round
+		t.simplify()
+		if not inplace:
+			return t
+		self.__dict__.update(t.__dict__)
+
+	def sub(self, s: Union[int, float], inplace: bool = False):
+		"""
+		Subtracts the given seconds
+
+		:param s:
+		:param inplace:
+		:return:
+		"""
+		x = Time(seconds=s)
+		t = self - x
+		t.round = self.round
+		t.simplify()
+		if not inplace:
+			return t
+		self.__dict__.update(t.__dict__)
+
 
 def length(*args, **kwargs) -> int:
 	"""
@@ -233,4 +322,3 @@ def length(*args, **kwargs) -> int:
 	:return:
 	"""
 	return sum(len(x) for x in list(args) + list(kwargs.values()))
-

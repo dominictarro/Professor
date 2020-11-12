@@ -4,7 +4,7 @@ Contains classes and functions to construct question types
 
 """
 # Foreign dependencies
-from typing import Union, Optional
+from typing import Union, Optional, Callable
 from string import ascii_lowercase
 from fuzzywuzzy.fuzz import ratio
 from discord.ext import commands
@@ -18,7 +18,7 @@ from prof.utils import numeric, system, event
 
 class QuestionBase(object):
 	_bool_map = {"true": True, "false": False}
-	_attrs = ["type", "text", "answer", "image", "bot", "guild", "id"]
+	_attrs = ["type", "text", "answer", "image", "bot", "guild", "id", "version"]
 	__help = "**Formatted** help text for __question type__."
 
 	def __init__(self, type: str, *args, **kwargs):
@@ -26,12 +26,13 @@ class QuestionBase(object):
 		Abstract class for question types to inherit from
 
 		:param type:    Question's structure type
+		:param version: Number of versions
 		:param text:    Question's text
 		:param answer:  Question's answer
 		:param image:   Image to include
 		:param bot:     Discord bot's instance
 		:param guild:   Discord guild
-		:param id:     Question's integer id
+		:param id:      Question's integer id
 		--------------------------------------
 		Subclass parameters
 		:param options:     Possible answers
@@ -42,6 +43,7 @@ class QuestionBase(object):
 
 		"""
 		self.type: str = type
+		self.version: int = 1
 		self.text: Optional[str] = None
 		self.image: Optional[bytes] = None
 		self.answer: Optional[Union[str, int, float]] = None
@@ -62,7 +64,7 @@ class QuestionBase(object):
 
 	@property
 	def dict(self) -> dict:
-		return self.__q_dict()
+		return self._base_dict()
 
 	@property
 	def qtype(self) -> str:
@@ -80,9 +82,9 @@ class QuestionBase(object):
 		:param i:
 		:return:
 		"""
-		return self.basic_embed(i=i)
+		return self.base_embed(i=i)
 
-	def basic_embed(self, i: int) -> discord.Embed:
+	def base_embed(self, i: int) -> discord.Embed:
 		"""
 		Generates and returns the question's embed with an index
 
@@ -99,9 +101,9 @@ class QuestionBase(object):
 
 	@property
 	def editor_embed(self):
-		return self._basic_editor_embed()
+		return self._base_editor_embed()
 
-	def __q_dict(self):
+	def _base_dict(self):
 		"""
 		Returns the basic question attributes in dictionary form
 
@@ -110,12 +112,13 @@ class QuestionBase(object):
 		return dict(
 			id=self.id,
 			type=self.type,
+			version=self.version,
 			text=self.text,
 			image=self.image,
 			answer=self.answer
 		)
 
-	def _basic_editor_embed(self) -> discord.Embed:
+	def _base_editor_embed(self) -> discord.Embed:
 		"""
 		Generates and returns the question's attributes as an embed
 
@@ -205,13 +208,20 @@ class QuestionBase(object):
 		return True
 
 	@event.on_change_embed
-	def edit_type(self, change: str) -> bool:
+	def edit_type(self, change: str):
 		"""
+		Modifies the question type
 
 		:return:
 		"""
-		# TODO: Callback?
-		return True
+		if change in Question.types():
+			params = self.dict
+			params.pop("type")
+			new = Question(params, type=change)
+			self.__dict__.update(new.__dict__)
+			self.__class__ = new.__class__
+			return True
+		return False
 
 
 class FreeResponse(QuestionBase):
@@ -234,20 +244,30 @@ class FreeResponse(QuestionBase):
 		"""
 		self.exact = False
 		self._min_ratio = 70
-		super(FreeResponse, self).__init__("free-response", *args, **kwargs)
 		self._attrs.extend(["exact"])
+		super(FreeResponse, self).__init__("free-response", *args, **kwargs)
 
 	@property
 	def dict(self):
-		dct = self.__q_dict()
+		dct = self._base_dict()
 		dct.update({"exact": self.exact})
 		return dct
 
 	@property
 	def editor_embed(self) -> discord.Embed:
-		embed = self._basic_editor_embed()
+		embed = self._base_editor_embed()
 		embed.insert_field_at(index=0, name="Exact", value=str(self.exact))
 		return embed
+
+	@property
+	def precision(self) -> int:
+		if not self.exact:
+			# If not exact, the Levenshtein ratio minimum is set as a percentage of the answer size
+			# or, if short, default is at 70
+			L = len(self.answer)
+			precision_low_bound = int(round(100 - 100 / (L ** 0.5)))
+			return max(self._min_ratio, precision_low_bound)
+		return 100
 
 	def build(self, *args, **kwargs):
 		"""
@@ -257,12 +277,13 @@ class FreeResponse(QuestionBase):
 		:param kwargs:
 		:return:
 		"""
-		# If not exact, the Levenshtein ratio minimum is set as a percentage of the answer size
-		# or, if short, default is at 70
-		if not self.exact:
-			L = len(self.answer)
-			min_ratio = 100 - 100 / (L ** 0.5)
-			self._min_ratio = max(self._min_ratio, min_ratio)
+		if isinstance(self.answer, (int, float)):
+			self.answer = str(self.answer)
+		elif isinstance(self.answer, (list, tuple, set)):
+			if self.answer:
+				self.answer = random.choice(self.answer)
+			else:
+				self.answer = None
 
 	def check(self, other: Union[str, int, float]) -> bool:
 		"""
@@ -271,9 +292,7 @@ class FreeResponse(QuestionBase):
 		:param other:
 		:return:
 		"""
-		if self.exact:
-			return other == self.answer
-		return ratio(other, self.answer) >= self._min_ratio
+		return ratio(other, self.answer) >= self.precision
 
 	@event.on_change_embed
 	def edit_exact(self, change: str) -> bool:
@@ -305,31 +324,29 @@ class Numeric(QuestionBase):
 		:param kwargs:
 		"""
 		self.decimal: Optional[int] = None
-		super(Numeric, self).__init__("numeric", *args, **kwargs)
 		self._attrs.extend(["decimal"])
+		super(Numeric, self).__init__("numeric", *args, **kwargs)
 
 	@property
 	def dict(self) -> dict:
-		dct = self.__q_dict()
+		dct = self._base_dict()
 		dct.update({"decimal": self.decimal})
 		return dct
 
 	@property
 	def editor_embed(self) -> discord.Embed:
-		embed = self._basic_editor_embed()
+		embed = self._base_editor_embed()
 		embed.insert_field_at(index=0, name="Decimal", value=str(self.decimal))
 		return embed
 
-	def __round(self, string: str) -> Optional[Union[int, float]]:
-		"""
-		Rounds a value to the appropriate type
-
-		:param string:
-		:return:
-		"""
-		try:
-			return int(string) if self.decimal == 0 else (round(float(string), self.decimal) if self.decimal else float(string))
-		except ValueError:
+	@staticmethod
+	def _numeric_string(string: str) -> Optional[Union[int, float]]:
+		partial = string.split('.')
+		if string.isnumeric():
+			return int(string)
+		elif all(x.isnumeric() for x in partial) & (0 < len(partial) < 3):
+			return float(string)
+		else:
 			return None
 
 	def build(self, *args, **kwargs):
@@ -340,7 +357,27 @@ class Numeric(QuestionBase):
 		:param kwargs:
 		:return:
 		"""
-		self.answer = round(self.answer, self.decimal)
+		if isinstance(self.answer, (int, float)):
+			self.answer = round(self.answer, self.decimal)
+		elif isinstance(self.answer, str):
+			# If it is a string, check if it is a numeric string
+			converted = self._numeric_string(string=self.answer)
+			if converted is not None:
+				self.answer = converted
+		elif isinstance(self.answer, (list, tuple, set)):
+			numeric_answers = []
+			# Check answers for numeric answers
+			for ans in self.answer:
+				converted = self._numeric_string(string=ans)
+				if converted is not None:
+					numeric_answers.append(converted)
+			# Choose one of the numeric answers or set answers equal to None
+			if numeric_answers:
+				self.answer = random.choice(numeric_answers)
+			else:
+				self.answer = None
+		else:
+			self.answer = None
 
 	def check(self, other: str) -> bool:
 		"""
@@ -349,7 +386,8 @@ class Numeric(QuestionBase):
 		:param other:
 		:return:
 		"""
-		return self.__round(other) == self.__round(str(self.answer))
+		numer_response = self._numeric_string(other)
+		return round(numer_response, self.decimal) == round(self.answer, self.decimal) if numer_response is not None else False
 
 	@event.on_change_embed
 	def edit_decimal(self, change: str) -> bool:
@@ -374,12 +412,9 @@ class Numeric(QuestionBase):
 		:param change:
 		:return:
 		"""
-		partial = change.split('.')
-		if change.isnumeric():
-			self.answer = int(self.answer)
-			return True
-		elif all(x.isnumeric() for x in partial) & (0 < len(partial) < 3):
-			self.answer = float(self.answer)
+		converted = self._numeric_string(string=change)
+		if converted is not None:
+			self.answer = converted
 			return True
 		return False
 
@@ -406,10 +441,12 @@ class MultipleChoice(QuestionBase):
 		:param args:
 		:param kwargs:
 		"""
-		self.options = []
-		self.shuffle = False
-		super(MultipleChoice, self).__init__("multiple-choice", *args, **kwargs)
+		self.options: list = []
+		self.shuffle: bool = False
 		self._attrs.extend(["options", "shuffle"])
+		super(MultipleChoice, self).__init__("multiple-choice", *args, **kwargs)
+		if self.shuffle:
+			random.shuffle(self.options)
 
 	@property
 	def Options(self) -> dict:
@@ -421,13 +458,13 @@ class MultipleChoice(QuestionBase):
 
 	@property
 	def dict(self):
-		dct = self.__q_dict()
+		dct = self._base_dict()
 		dct.update({"options": self.options, "shuffle": self.shuffle})
 		return dct
 
 	@property
 	def editor_embed(self) -> discord.Embed:
-		embed = self._basic_editor_embed()
+		embed = self._base_editor_embed()
 		embed.insert_field_at(index=0, name="Shuffle", value=str(self.shuffle))
 		embed.insert_field_at(index=1, name="Options", value='\n'.join(f"{i+1}) {opt}" for i, opt in enumerate(self.options)))
 		return embed
@@ -440,8 +477,25 @@ class MultipleChoice(QuestionBase):
 		:param kwargs:
 		:return:
 		"""
-		if self.shuffle:
-			random.shuffle(self.options)
+
+		if isinstance(self.answer, (list, tuple, set)):
+			# Only retain one of the answers
+			# Only relevant to type transform from Multiple Response
+			if self.answer:
+				keep = random.choice(self.answer)
+				to_remove = set(self.options).intersection(set(self.answer).difference([keep]))
+				for ans in to_remove:
+					self.options.remove(ans)
+				self.answer = keep
+			else:
+				self.answer = None
+		elif isinstance(self.answer, (int, float)):
+			# Force to string
+			self.answer = str(self.answer)
+
+		if (self.answer not in self.options) & (self.answer is not None):
+			# Ensure answer is in options
+			self.options.append(self.answer)
 
 	def embed(self, i: int) -> discord.Embed:
 		"""
@@ -450,7 +504,7 @@ class MultipleChoice(QuestionBase):
 		:param i:
 		:return:
 		"""
-		embed = self.basic_embed(i=i)
+		embed = self.base_embed(i=i)
 		embed.insert_field_at(0, name="Options", value=self.option_string)
 		return embed
 
@@ -470,7 +524,7 @@ class MultipleChoice(QuestionBase):
 
 	def _add_option(self, change: str) -> bool:
 		"""
-		Base method to add an option to the option array if it meets requisites.
+		Base method to add an option to the option array if it meets Discord requirements.
 
 		:param change:
 		:return:
@@ -548,13 +602,12 @@ class MultipleResponse(MultipleChoice):
 	"""
 
 	def __init__(self, *args, **kwargs):
-		self.partial: bool = False
-		super(MultipleResponse, self).__init__(*args, **kwargs)
 		self._attrs.extend(["partial"])
+		super(MultipleResponse, self).__init__(*args, **kwargs)
 
 	@property
 	def editor_embed(self) -> discord.Embed:
-		embed = self._basic_editor_embed()
+		embed = self._base_editor_embed()
 		# Drop answer field
 		embed.remove_field(1)
 		embed.insert_field_at(index=0, name="Shuffle", value=str(self.shuffle))
@@ -573,10 +626,16 @@ class MultipleResponse(MultipleChoice):
 		"""
 		self.type = "multiple-response"
 
-		self.answer = list(self.answer) if isinstance(self.answer, (tuple, list)) else [self.answer]
+		if isinstance(self.answer, (tuple, list, set)):
+			self.answer = list(self.answer)
+		else:
+			self.answer = [str(self.answer)] if self.answer is not None else []
 		self.answer.sort()
-		if self.shuffle:
-			random.shuffle(self.options)
+
+		for ans in self.answer:
+			if ans not in self.options:
+				# Ensure answer is in options
+				self.options.append(ans)
 
 	def check(self, other: str) -> bool:
 		"""
@@ -662,7 +721,6 @@ class Question:
 		"""
 		if doc is None:
 			doc = {}
-
 		doc.update(kwargs)
 		if type:
 			return cls._map[type](**doc)
@@ -671,3 +729,6 @@ class Question:
 		else:
 			raise AttributeError("'type' is missing from arguments")
 
+	@classmethod
+	def types(cls) -> list:
+		return list(cls._map.keys())

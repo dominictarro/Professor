@@ -1,11 +1,15 @@
 from typing import Union, Dict, Callable, Any
+import random
 
 from prof.utils.numeric import Time
 
 
-class QuizBase(object):
+class Quiz(object):
 
-	def __int__(self, *args, **kwargs):
+	_bool_map = {"true": True, "false": False}
+	__kwarg_map = dict(period="_period", limit="_limit")
+
+	def __init__(self, *args, **kwargs):
 		"""
 		:param name:        Name given by quiz creator
 		:param id:          Identifier in database
@@ -13,6 +17,7 @@ class QuizBase(object):
 		:param questions:   All questions in quiz
 		:param size:        How many questions to sample and administer
 
+		:param sample:      A sample of questions to administer
 		:return:
 		"""
 		self.name: str = ""
@@ -21,7 +26,11 @@ class QuizBase(object):
 		self.questions: list = []
 		self.size: Union[int, str] = '*'
 		self._limit: Time = Time(minutes=10)
-		self.build()
+		self._period: Time = Time(minutes=1)
+
+		kwargs = self.__kwarg_filter(**kwargs)
+		self.__dict__.update(kwargs)
+		self.size = len(self.questions) if self.size == '*' else self.size
 
 	@property
 	def limit(self):
@@ -29,40 +38,67 @@ class QuizBase(object):
 
 	@limit.setter
 	def limit(self, new: Time):
-		pass
+		assert isinstance(new, Time) & (new <= Time(weeks=1))
+		self._limit = new
 
-	def build(self, *args, **kwargs):
+	def __iter__(self):
 		"""
-		Placeholder method for augmenting parameters on initialization
+		Generator for a sample of questions of the given size
 
 		:return:
 		"""
-		self.__dict__.update(kwargs)
+		yield from random.sample(self.questions, k=self.size)
 
-
-class SyncQuiz(QuizBase):
-
-	def __init__(self, *args, **kwargs):
-		super(SyncQuiz, self).__init__(*args, **kwargs)
-
-	def build(self, *args, **kwargs):
+	def __kwarg_filter(self, **kwargs):
 		"""
-		Placeholder method for augmenting parameters on initialization
+		Method for renaming keywords on initialization and removing unsupported keywords
 
 		:return:
 		"""
-		self.__dict__.update(kwargs)
+		for k, v in kwargs.items():
+			if k in self.__kwarg_map:
+				# Rename key
+				kwargs[self.__kwarg_map[k]] = v
+			elif k not in self.__dict__:
+				# Drop unsupported keywords
+				kwargs.pop(k)
 
+		return kwargs
 
-class AsyncQuiz(QuizBase):
-
-	def __init__(self, *args, **kwargs):
-		super(AsyncQuiz, self).__init__(*args, **kwargs)
-
-	def build(self, *args, **kwargs):
+	def edit_boolean(self, change: str, attribute: str):
 		"""
-		Placeholder method for augmenting parameters on initialization
+		Edits the value of a boolean attribute in the quiz
 
+		:param change:      New value
+		:param attribute:   Variable to change
 		:return:
 		"""
-		self.__dict__.update(kwargs)
+		if (change := change.lower()) in self._bool_map:
+			self.__dict__[attribute] = self._bool_map[change]
+			return True
+		return False
+
+	def edit_numeric(self, change: str, attribute: str):
+		"""
+		Edits the value of a numeric attribute in the quiz
+
+		:param change:      New value
+		:param attribute:   Variable to change
+		:return:
+		"""
+		if change.isnumeric():
+			self.__dict__[attribute] = int(change)
+			return True
+		else:
+			parts = change.split('.')
+			if all(x.isnumeric() for x in parts) & (0 < len(parts) < 3):
+				self.__dict__[attribute] = float(change)
+				return True
+		return False
+
+
+if __name__ == "__main__":
+	quiz = Quiz(questions=["a", "b", "c"])
+	print(quiz.questions)
+	for x in quiz:
+		print(x)
