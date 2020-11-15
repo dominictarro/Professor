@@ -11,7 +11,7 @@ The professor is a dual project: both a library and a bot. Its
 mission is to offer a structured process of administering and
 building quizzes in **Discord**.
 
-### Library
+### [Library](https://github.com/dominictarro/ProfessorLib)
 The library allows other discord.py developers to build quizzing
 bots using **Professor**'s `build.objects`. For those interested
 in further customization, abstract classes and methods are
