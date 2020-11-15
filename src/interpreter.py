@@ -8,8 +8,6 @@ from discord.ext import commands
 import discord
 import re
 
-from professor.utils import numeric
-
 
 class CommandInterpreter:
 	# Parses the flags in a bot command
@@ -21,7 +19,6 @@ class CommandInterpreter:
 		"new", "global", "plot", "history",
 		"quiz"
 	]
-	to_time = ["period", "limit"]
 	to_int = ["id", "size"]
 
 	"""
@@ -29,7 +26,6 @@ class CommandInterpreter:
 	:param __free_rgx:      Regex for free flags
 	:param __keyword_rgx:   Regex for keyword flags
 	:param default_scope:   Accepted flags
-	:param to_time:         Flags that should be converted to time
 	:param to_int:          Flags that should be converted to integers
 	"""
 
@@ -67,9 +63,6 @@ class CommandInterpreter:
 				if match.group("flag") in scope:
 					flags[match.group("flag")] = True
 
-		# Conversion
-		for key in set(cls.to_time).intersection(flags.keys()):
-			flags[key] = numeric.Time.parse(flags[key])
 
 		# Conversion
 		for key in set(cls.to_int).intersection(flags.keys()):
@@ -103,8 +96,6 @@ class QuizInterpreter:
 	operator_rgx = re.compile(r"^\$(?P<operator>[a-zA-z]+?)(\s|$)")
 	param_rgx = re.compile(r"(?P<param>[a-zA-z]+?)=(?P<value>(\".+?\")|([\S]+?))(\s|$)", flags=re.DOTALL)
 
-	to_time = ["period", "limit"]
-
 	@classmethod
 	def read(cls, string: str):
 		"""
@@ -124,9 +115,6 @@ class QuizInterpreter:
 			for arg in par:
 				param = arg.group("param")
 				value = arg.group("value")
-
-				if param in cls.to_time:
-					value = numeric.Time.parse(value)
 
 				edits.append((op, param, value))
 
